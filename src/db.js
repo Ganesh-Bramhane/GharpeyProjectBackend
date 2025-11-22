@@ -1,16 +1,17 @@
-// src/db.js
-require('dotenv').config();
-const mysql = require('mysql2/promise');
+const mongoose = require('mongoose');
 
-const pool = mysql.createPool({
-  host: process.env.DB_HOST || 'localhost',
-  port: process.env.DB_PORT ? Number(process.env.DB_PORT) : 3306,
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASS || '',
-  database: process.env.DB_NAME || 'gharpey',
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
-});
+module.exports = function connectDB() {
+  const uri = process.env.MONGO_URI;
 
-module.exports = pool;
+  if (!uri) {
+    console.error("❗ MONGO_URI not found in .env file");
+    process.exit(1);
+  }
+
+  mongoose.connect(uri)
+    .then(() => console.log("MongoDB connected"))
+    .catch((err) => {
+      console.error("MongoDB connection error:", err);
+      process.exit(1);
+    });
+};

@@ -1,64 +1,57 @@
-// src/controllers/conversationsController.js
-const db = require('../db');
+const Conversation = require('../models/Conversation');
+const User = require('../models/User');
+const { sendTextMessage } = require('../services/whatsappService');
 
-// Read messages for a user (latest 200)
+// -----------------------------------------------------
+// 1️⃣ GET ALL CONVERSATIONS / MESSAGES FOR A USER (BY PHONE)
+// -----------------------------------------------------
 exports.getConversationsForUser = async (req, res, next) => {
   try {
-    const userId = Number(req.params.userId);
-    const [rows] = await db.query(
-      `SELECT id, direction, text, raw_payload_json, intent_id, sentiment, created_at 
-       FROM conversations WHERE user_id = ? ORDER BY created_at ASC LIMIT 1000`,
-      [userId]
-    );
-    // map to frontend-friendly shape
-    const messages = rows.map(r => ({
-      id: r.id,
-      from: r.direction === 'out' ? 'me' : 'them',
-      text: r.text,
-      ts: r.created_at,
-      raw: r.raw_payload_json,
-      intent_id: r.intent_id,
-      sentiment: r.sentiment
-    }));
-    res.json(messages);
+    const phone = req.params.phone;   // always phone
+
+    const convs = await Conversation.find({ phone })
+      .sort({ createdAt: 1 })
+      .limit(2000);
+
+    res.json(convs);
   } catch (err) {
     next(err);
   }
 };
 
-// Send message to user (store notification + placeholder send logic)
+// -----------------------------------------------------
+// 2️⃣ SEND MESSAGE TO USER (WHATSAPP) + SAVE IN DB
+// -----------------------------------------------------
 exports.sendMessageToUser = async (req, res, next) => {
   try {
-    const userId = Number(req.params.userId);
+    const phone = req.params.phone;
     const { text } = req.body;
-    if (!text) return res.status(400).json({ error: 'text_required' });
 
-    // store in conversations (direction = out)
-    const [result] = await db.query(
-      `INSERT INTO conversations (user_id, direction, text, raw_payload_json, created_at) VALUES (?, 'out', ?, ?, NOW())`,
-      [userId, text, JSON.stringify({ via: 'api' })]
-    );
+    if (!text || text.trim() === "") {
+      return res.status(400).json({ error: "text_required" });
+    }
 
-    const insertId = result.insertId;
+    // 1️⃣ find user or create if missing
+    let user = await User.findOne({ phone });
+    if (!user) {
+      user = await User.create({ phone });
+    }
 
-    // append to notifications table (simulating outbound send)
-    await db.query(
-      `INSERT INTO notifications (user_id, workflow_instance_id, channel, channel_payload, status, provider_msg_id, created_at)
-       VALUES (?, NULL, 'whatsapp', ?, 'queued', NULL, NOW())`,
-      [userId, JSON.stringify({ text })]
-    );
+    // 2️⃣ SEND MESSAGE to WhatsApp (API)
+    const waRes = await sendTextMessage(phone, text);
 
-    // For now, return the conversation row we just created
-    const [rows] = await db.query('SELECT id, text, created_at FROM conversations WHERE id = ?', [insertId]);
-    const row = rows[0];
-
-    res.json({
-      id: row.id,
-      from: 'me',
-      text: row.text,
-      ts: row.created_at
+    // 3️⃣ save outbound message
+    const conv = await Conversation.create({
+      user_id: user._id,
+      phone,
+      direction: "out",
+      text,
+      raw: waRes,
     });
+
+    res.json(conv);
   } catch (err) {
+    console.error("Send message error:", err);
     next(err);
   }
 };

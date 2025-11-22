@@ -1,12 +1,11 @@
-// src/routes/conversations.js
 const express = require('express');
 const router = express.Router();
 const convController = require('../controllers/conversationsController');
 
-// GET /conversations/:userId
-router.get('/:userId', convController.getConversationsForUser);
+// Get chat history for a phone number
+router.get('/:phone', convController.getConversationsForUser);
 
-// POST /conversations/:userId/send
-router.post('/:userId/send', convController.sendMessageToUser);
+// Send message to a phone number
+router.post('/:phone/send', convController.sendMessageToUser);
 
 module.exports = router;

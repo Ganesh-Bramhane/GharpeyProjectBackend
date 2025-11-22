@@ -1,12 +1,14 @@
-// src/routes/users.js
 const express = require('express');
 const router = express.Router();
 const usersController = require('../controllers/usersController');
 
-// GET /users
+// List all users
 router.get('/', usersController.listUsers);
 
-// GET /users/:id
+// Get single user
 router.get('/:id', usersController.getUserById);
+
+// CREATE USER  ← THIS MUST BE PRESENT
+router.post('/', usersController.createUser);
 
 module.exports = router;

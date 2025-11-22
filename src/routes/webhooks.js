@@ -1,37 +1,78 @@
-// src/routes/webhooks.js
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const db = require('../db');
+const Conversation = require("../models/Conversation");
+const User = require("../models/User");
 
-// Simple verification endpoint for WhatsApp webhook (GET)
-router.get('/whatsapp', (req, res) => {
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
+// ---------------------------------------------------------
+// 1️⃣ VERIFY WEBHOOK (GET)
+// ---------------------------------------------------------
+router.get("/whatsapp", (req, res) => {
+  const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
 
-  if (mode === 'subscribe' && token === process.env.WHATSAPP_VERIFY_TOKEN) {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+
+  if (mode === "subscribe" && token === VERIFY_TOKEN) {
+    console.log("✅ WEBHOOK VERIFIED SUCCESSFULLY!");
     return res.status(200).send(challenge);
   }
 
-  res.status(403).send('forbidden');
+  console.log("❌ WEBHOOK VERIFICATION FAILED!");
+  return res.sendStatus(403);
 });
 
-// Incoming messages (POST)
-router.post('/whatsapp', async (req, res) => {
+// ---------------------------------------------------------
+// 2️⃣ HANDLE INCOMING WHATSAPP MESSAGES (POST)
+// ---------------------------------------------------------
+router.post("/whatsapp", async (req, res) => {
   try {
-    const payload = req.body;
+    const body = req.body;
 
-    await db.query(
-      `INSERT INTO conversations (user_id, direction, text, raw_payload_json, created_at)
-       VALUES (NULL, 'in', ?, ?, NOW())`,
-      [JSON.stringify(payload).slice(0, 10000), JSON.stringify(payload)]
-    );
+    const msg = body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+    if (!msg) return res.sendStatus(200);
 
-    res.json({ status: 'received' });
+    const phone = msg.from;
+    const text = msg.text?.body || "";
+
+    console.log(`💬 Incoming: ${phone} → ${text}`);
+
+    // 1️⃣ Find/create user
+    let user = await User.findOne({ phone });
+    if (!user) user = await User.create({ phone });
+
+    // 2️⃣ Save incoming conversation
+    await Conversation.create({
+      user_id: user._id,
+      direction: "in",
+      text,
+      raw: body
+    });
+
+    // 3️⃣ Generate AI reply
+    const aiReply = await require("../services/aiService").generateAIReply(text);
+
+    console.log("🤖 AI Reply:", aiReply);
+
+    // 4️⃣ Send reply back to WhatsApp
+    const { sendTextMessage } = require("../services/whatsappService");
+    await sendTextMessage(phone, aiReply);
+
+    // 5️⃣ Save outgoing message
+    await Conversation.create({
+      user_id: user._id,
+      direction: "out",
+      text: aiReply,
+      raw: { aiReply }
+    });
+
+    res.sendStatus(200);
+
   } catch (err) {
-    console.error('webhook error', err);
-    res.status(500).json({ error: 'internal' });
+    console.error("🔥 WEBHOOK AUTO-REPLY ERROR:", err);
+    res.sendStatus(500);
   }
 });
+
 
 module.exports = router;

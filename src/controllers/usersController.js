@@ -1,10 +1,9 @@
-// src/controllers/usersController.js
-const db = require('../db');
+const User = require('../models/User');
 
 exports.listUsers = async (req, res, next) => {
   try {
-    const [rows] = await db.query('SELECT id, name, phone, language_pref AS lang, created_at FROM users ORDER BY id DESC LIMIT 100');
-    res.json(rows);
+    const users = await User.find().sort({ createdAt: -1 });
+    res.json(users);
   } catch (err) {
     next(err);
   }
@@ -12,10 +11,27 @@ exports.listUsers = async (req, res, next) => {
 
 exports.getUserById = async (req, res, next) => {
   try {
-    const userId = Number(req.params.id);
-    const [rows] = await db.query('SELECT id, name, phone, language_pref AS lang, meta_json FROM users WHERE id = ?', [userId]);
-    if (!rows.length) return res.status(404).json({ error: 'user_not_found' });
-    res.json(rows[0]);
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ error: 'user_not_found' });
+    res.json(user);
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.createUser = async (req, res, next) => {
+  try {
+    const { name, phone } = req.body;
+
+    if (!phone) return res.status(400).json({ error: "phone_required" });
+
+    let user = await User.findOne({ phone });
+
+    if (user) return res.json(user);
+
+    user = await User.create({ name, phone });
+
+    res.json(user);
   } catch (err) {
     next(err);
   }
