@@ -25,54 +25,68 @@ router.get("/whatsapp", (req, res) => {
 // ---------------------------------------------------------
 // 2️⃣ HANDLE INCOMING WHATSAPP MESSAGES (POST)
 // ---------------------------------------------------------
-router.post("/whatsapp", async (req, res) => {
+router.post('/whatsapp', async (req, res) => {
+  const body = req.body;
+
   try {
-    const body = req.body;
+    if (
+      body.object &&
+      body.entry &&
+      body.entry[0].changes &&
+      body.entry[0].changes[0].value.messages &&
+      body.entry[0].changes[0].value.messages[0]
+    ) {
+      const msg = body.entry[0].changes[0].value.messages[0];
+      const phone = msg.from;
+      const text = msg.text?.body || "";
 
-    const msg = body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-    if (!msg) return res.sendStatus(200);
+      console.log("Incoming message:", phone, text);
 
-    const phone = msg.from;
-    const text = msg.text?.body || "";
+      // Find or create user
+      let user = await User.findOne({ phone });
+      if (!user) user = await User.create({ phone, name: phone });
 
-    console.log(`💬 Incoming: ${phone} → ${text}`);
+      // --- AI ANALYSIS ---
+      const { analyzeMessage, generateAIReply } = require("../services/aiService");
+      const analysis = await analyzeMessage(text);
 
-    // 1️⃣ Find/create user
-    let user = await User.findOne({ phone });
-    if (!user) user = await User.create({ phone });
+      // Save the inbound message
+      await Conversation.create({
+        user_id: user._id,
+        phone,
+        direction: "in",
+        text,
+        intent: analysis.intent,
+        sentiment: analysis.sentiment,
+        raw: body
+      });
 
-    // 2️⃣ Save incoming conversation
-    await Conversation.create({
-      user_id: user._id,
-      direction: "in",
-      text,
-      raw: body
-    });
+      // --- AI AUTO-REPLY ---
+     // --- RUN WORKFLOW ---
+const { runWorkflow } = require("../workflows/workflowEngine");
 
-    // 3️⃣ Generate AI reply
-    const aiReply = await require("../services/aiService").generateAIReply(text);
+const workflowResult = await runWorkflow(analysis.intent, user, text);
 
-    console.log("🤖 AI Reply:", aiReply);
+if (workflowResult?.reply) {
+  await Conversation.create({
+    user_id: user._id,
+    phone,
+    direction: "out",
+    text: workflowResult.reply,
+    raw: { system: true },
+    intent: analysis.intent
+  });
+}
 
-    // 4️⃣ Send reply back to WhatsApp
-    const { sendTextMessage } = require("../services/whatsappService");
-    await sendTextMessage(phone, aiReply);
-
-    // 5️⃣ Save outgoing message
-    await Conversation.create({
-      user_id: user._id,
-      direction: "out",
-      text: aiReply,
-      raw: { aiReply }
-    });
+    }
 
     res.sendStatus(200);
-
-  } catch (err) {
-    console.error("🔥 WEBHOOK AUTO-REPLY ERROR:", err);
+  } catch (e) {
+    console.error("Webhook error:", e);
     res.sendStatus(500);
   }
 });
+
 
 
 module.exports = router;
