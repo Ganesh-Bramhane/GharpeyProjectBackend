@@ -1,57 +1,72 @@
 const Conversation = require('../models/Conversation');
 const User = require('../models/User');
 const { sendTextMessage } = require('../services/whatsappService');
+const { analyzeMessage } = require('../services/aiService');
 
-// -----------------------------------------------------
-// 1️⃣ GET ALL CONVERSATIONS / MESSAGES FOR A USER (BY PHONE)
-// -----------------------------------------------------
 exports.getConversationsForUser = async (req, res, next) => {
   try {
-    const phone = req.params.phone;   // always phone
+    const userId = req.params.userId;
 
-    const convs = await Conversation.find({ phone })
-      .sort({ createdAt: 1 })
-      .limit(2000);
+    const convs = await Conversation.find({
+      $or: [{ user_id: userId }, { phone: userId }]
+    }).sort({ createdAt: 1 });
 
     res.json(convs);
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
 
-// -----------------------------------------------------
-// 2️⃣ SEND MESSAGE TO USER (WHATSAPP) + SAVE IN DB
-// -----------------------------------------------------
 exports.sendMessageToUser = async (req, res, next) => {
   try {
-    const phone = req.params.phone;
+    const userIdOrPhone = req.params.userId;
     const { text } = req.body;
 
-    if (!text || text.trim() === "") {
-      return res.status(400).json({ error: "text_required" });
+    let user = null;
+
+    if (/^\d+$/.test(userIdOrPhone)) {
+      user = await User.findOne({ phone: userIdOrPhone });
+    } else {
+      user = await User.findById(userIdOrPhone);
     }
 
-    // 1️⃣ find user or create if missing
-    let user = await User.findOne({ phone });
-    if (!user) {
-      user = await User.create({ phone });
-    }
+    const toPhone = user ? user.phone : userIdOrPhone;
 
-    // 2️⃣ SEND MESSAGE to WhatsApp (API)
-    const waRes = await sendTextMessage(phone, text);
+    const waRes = await sendTextMessage(toPhone, text);
 
-    // 3️⃣ save outbound message
     const conv = await Conversation.create({
-      user_id: user._id,
-      phone,
-      direction: "out",
+      user_id: user ? user._id : null,
+      phone: toPhone,
+      direction: 'out',
       text,
-      raw: waRes,
+      raw: waRes
     });
 
     res.json(conv);
+  } catch (err) { next(err); }
+};
+
+exports.processIncomingMessage = async (req, res, next) => {
+  try {
+    const { phone, text } = req.body;
+
+    let user = await User.findOne({ phone });
+    if (!user) user = await User.create({ phone });
+
+    const ai = await analyzeMessage(text);
+
+    await Conversation.create({
+      user_id: user._id,
+      phone,
+      direction: "in",
+      text,
+      intent: ai.intent,
+      sentiment: ai.sentiment,
+      raw: req.body
+    });
+
+    await sendTextMessage(phone, ai.reply);
+
+    res.json({ status: "ok", ai });
   } catch (err) {
-    console.error("Send message error:", err);
     next(err);
   }
 };

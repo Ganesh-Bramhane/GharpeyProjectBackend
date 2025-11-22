@@ -1,45 +1,24 @@
-const OpenAI = require("openai");
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const axios = require("axios");
 
-exports.analyzeMessage = async (text) => {
-  try {
-    const res = await client.responses.create({
+exports.generateAIResponse = async (prompt) => {
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  const res = await axios.post(
+    "https://api.openai.com/v1/chat/completions",
+    {
       model: "gpt-4o-mini",
-      input: `
-        Analyze the following message.
-        Return JSON only with:
+      messages: [
         {
-          "intent": "",
-          "sentiment": "",
-          "entities": {}
-        }
+          role: "system",
+          content: "You are GharPay AI assistant. Give short helpful answers."
+        },
+        { role: "user", content: prompt }
+      ]
+    },
+    {
+      headers: { Authorization: `Bearer ${apiKey}` }
+    }
+  );
 
-        Message: "${text}"
-      `
-    });
-
-    return JSON.parse(res.output[0].content[0].text);
-  } catch (err) {
-    console.error("AI analysis error:", err);
-    return {};
-  }
-};
-
-exports.generateAIReply = async (text) => {
-  try {
-    const res = await client.responses.create({
-      model: "gpt-4o-mini",
-      input: `
-        You are an AI WhatsApp Assistant for a home services company.
-        Reply shortly and clearly.
-
-        User said: "${text}"
-      `
-    });
-
-    return res.output[0].content[0].text;
-  } catch (err) {
-    console.error("AI reply error:", err);
-    return null;
-  }
+  return res.data.choices[0].message.content;
 };

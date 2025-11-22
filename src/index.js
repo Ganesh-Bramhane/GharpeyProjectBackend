@@ -1,4 +1,7 @@
 require("dotenv").config();
+require("./workflows/scheduler");
+require("./cron/reminders");
+
 const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
@@ -10,6 +13,7 @@ const webhookRoutes = require("./routes/webhooks");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
 
 // -------------------- Middlewares --------------------
 app.use(cors());
